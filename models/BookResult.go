@@ -9,21 +9,22 @@ import (
 	"strings"
 	"time"
 
+	"encoding/json"
+	"net/http"
+	"regexp"
+
 	"github.com/PuerkitoBio/goquery"
 	"github.com/astaxie/beego"
 	"github.com/astaxie/beego/logs"
 	"github.com/astaxie/beego/orm"
-	"github.com/lifei6671/mindoc/conf"
-	"github.com/lifei6671/mindoc/converter"
-	"github.com/lifei6671/mindoc/utils/filetil"
-	"github.com/lifei6671/mindoc/utils/ziptil"
+	"github.com/mindoc-org/mindoc/conf"
+	"github.com/mindoc-org/mindoc/converter"
+	"github.com/mindoc-org/mindoc/utils/cryptil"
+	"github.com/mindoc-org/mindoc/utils/filetil"
+	"github.com/mindoc-org/mindoc/utils/gopool"
+	"github.com/mindoc-org/mindoc/utils/requests"
+	"github.com/mindoc-org/mindoc/utils/ziptil"
 	"gopkg.in/russross/blackfriday.v2"
-	"regexp"
-	"github.com/lifei6671/mindoc/utils/cryptil"
-	"github.com/lifei6671/mindoc/utils/requests"
-	"github.com/lifei6671/mindoc/utils/gopool"
-	"net/http"
-	"encoding/json"
 )
 
 var (
@@ -33,12 +34,15 @@ var (
 type BookResult struct {
 	BookId         int       `json:"book_id"`
 	BookName       string    `json:"book_name"`
+	ItemId         int       `json:"item_id"`
+	ItemName       string    `json:"item_name"`
 	Identify       string    `json:"identify"`
 	OrderIndex     int       `json:"order_index"`
 	Description    string    `json:"description"`
 	Publisher      string    `json:"publisher"`
 	PrivatelyOwned int       `json:"privately_owned"`
 	PrivateToken   string    `json:"private_token"`
+	BookPassword   string    `json:"book_password"`
 	DocCount       int       `json:"doc_count"`
 	CommentStatus  string    `json:"comment_status"`
 	CommentCount   int       `json:"comment_count"`
@@ -54,12 +58,13 @@ type BookResult struct {
 	AutoRelease    bool      `json:"auto_release"`
 	HistoryCount   int       `json:"history_count"`
 
-	RelationshipId     int    `json:"relationship_id"`
-	RoleId             int    `json:"role_id"`
-	RoleName           string `json:"role_name"`
-	Status             int    `json:"status"`
-	IsEnableShare      bool   `json:"is_enable_share"`
-	IsUseFirstDocument bool   `json:"is_use_first_document"`
+	//RelationshipId     int           `json:"relationship_id"`
+	//TeamRelationshipId int           `json:"team_relationship_id"`
+	RoleId             conf.BookRole `json:"role_id"`
+	RoleName           string        `json:"role_name"`
+	Status             int           `json:"status"`
+	IsEnableShare      bool          `json:"is_enable_share"`
+	IsUseFirstDocument bool          `json:"is_use_first_document"`
 
 	LastModifyText   string `json:"last_modify_text"`
 	IsDisplayComment bool   `json:"is_display_comment"`
@@ -71,8 +76,8 @@ func NewBookResult() *BookResult {
 	return &BookResult{}
 }
 
-func (b *BookResult) String() string {
-	ret, err := json.Marshal(*b)
+func (m *BookResult) String() string {
+	ret, err := json.Marshal(*m)
 
 	if err != nil {
 		return ""
@@ -81,30 +86,30 @@ func (b *BookResult) String() string {
 }
 
 // 根据项目标识查询项目以及指定用户权限的信息.
-func (m *BookResult) FindByIdentify(identify string, memberId int, cols ...string) (*BookResult, error) {
+func (m *BookResult) FindByIdentify(identify string, memberId int) (*BookResult, error) {
 	if identify == "" || memberId <= 0 {
 		return m, ErrInvalidParameter
 	}
 	o := orm.NewOrm()
 
-	book := NewBook()
+	var book Book
 
-	err := o.QueryTable(book.TableNameWithPrefix()).Filter("identify", identify).One(book, cols...)
+	err := NewBook().QueryTable().Filter("identify", identify).One(&book)
 
 	if err != nil {
+		beego.Error("获取项目失败 ->", err)
 		return m, err
 	}
 
-	relationship := NewRelationship()
-
-	err = o.QueryTable(relationship.TableNameWithPrefix()).Filter("book_id", book.BookId).Filter("member_id", memberId).One(relationship)
+	roleId, err := NewBook().FindForRoleId(book.BookId, memberId)
 
 	if err != nil {
-		return m, err
+		return m, ErrPermissionDenied
 	}
 	var relationship2 Relationship
 
-	err = o.QueryTable(relationship.TableNameWithPrefix()).Filter("book_id", book.BookId).Filter("role_id", 0).One(&relationship2)
+	//查找项目创始人
+	err = NewRelationship().QueryTable().Filter("book_id", book.BookId).Filter("role_id", 0).One(&relationship2)
 
 	if err != nil {
 		logs.Error("根据项目标识查询项目以及指定用户权限的信息 -> ", err)
@@ -116,15 +121,14 @@ func (m *BookResult) FindByIdentify(identify string, memberId int, cols ...strin
 		return m, err
 	}
 
-	m = NewBookResult().ToBookResult(*book)
-
+	m.ToBookResult(book)
+	m.RoleId = roleId
+	m.MemberId = memberId
 	m.CreateName = member.Account
+
 	if member.RealName != "" {
 		m.RealName = member.RealName
 	}
-	m.MemberId = relationship.MemberId
-	m.RoleId = relationship.RoleId
-	m.RelationshipId = relationship.RelationshipId
 
 	if m.RoleId == conf.BookFounder {
 		m.RoleName = "创始人"
@@ -184,6 +188,7 @@ func (m *BookResult) ToBookResult(book Book) *BookResult {
 	m.Description = strings.Replace(book.Description, "\r\n", "<br/>", -1)
 	m.PrivatelyOwned = book.PrivatelyOwned
 	m.PrivateToken = book.PrivateToken
+	m.BookPassword = book.BookPassword
 	m.DocCount = book.DocCount
 	m.CommentStatus = book.CommentStatus
 	m.CommentCount = book.CommentCount
@@ -201,6 +206,7 @@ func (m *BookResult) ToBookResult(book Book) *BookResult {
 	m.HistoryCount = book.HistoryCount
 	m.IsDownload = book.IsDownload == 0
 	m.AutoSave = book.AutoSave == 1
+	m.ItemId = book.ItemId
 
 	if book.Theme == "" {
 		m.Theme = "default"
@@ -222,11 +228,16 @@ func (m *BookResult) ToBookResult(book Book) *BookResult {
 		m.LastModifyText = member2.Account + " 于 " + doc.ModifyTime.Local().Format("2006-01-02 15:04:05")
 	}
 
+	if m.ItemId > 0 {
+		if item,err := NewItemsets().First(m.ItemId); err == nil {
+			m.ItemName = item.ItemName
+		}
+	}
 	return m
 }
 
 //后台转换
-func BackgroupConvert(sessionId string, bookResult *BookResult) error {
+func BackgroundConvert(sessionId string, bookResult *BookResult) error {
 
 	if err := converter.CheckConvertCommand(); err != nil {
 		beego.Error("检查转换程序失败 -> ", err)
@@ -447,14 +458,14 @@ func (m *BookResult) Converter(sessionId string) (ConvertBookResult, error) {
 	if err := filetil.CopyFile(filepath.Join(conf.WorkingDirectory, "static", "css", "markdown.preview.css"), filepath.Join(tempOutputPath, "styles", "css", "markdown.preview.css")); err != nil {
 		beego.Error("复制CSS样式出错 -> static/css/markdown.preview.css", err)
 	}
-	if err := filetil.CopyFile(filepath.Join(conf.WorkingDirectory, "static","editor.md","lib", "highlight", "styles", "github.css"), filepath.Join(tempOutputPath, "styles","css", "github.css")); err != nil {
+	if err := filetil.CopyFile(filepath.Join(conf.WorkingDirectory, "static", "editor.md", "lib", "highlight", "styles", "github.css"), filepath.Join(tempOutputPath, "styles", "css", "github.css")); err != nil {
 		beego.Error("复制CSS样式出错 -> static/editor.md/lib/highlight/styles/github.css", err)
 	}
 
-	if err := filetil.CopyDir(filepath.Join(conf.WorkingDirectory,"static","font-awesome"), filepath.Join(tempOutputPath,"styles","font-awesome")); err != nil {
+	if err := filetil.CopyDir(filepath.Join(conf.WorkingDirectory, "static", "font-awesome"), filepath.Join(tempOutputPath, "styles", "font-awesome")); err != nil {
 		beego.Error("复制CSS样式出错 -> static/font-awesome", err)
 	}
-	if err := filetil.CopyFile(filepath.Join(conf.WorkingDirectory, "static","editor.md","lib","mermaid","mermaid.css"), filepath.Join(tempOutputPath, "styles", "css", "mermaid.css")); err != nil {
+	if err := filetil.CopyFile(filepath.Join(conf.WorkingDirectory, "static", "editor.md", "lib", "mermaid", "mermaid.css"), filepath.Join(tempOutputPath, "styles", "css", "mermaid.css")); err != nil {
 		beego.Error("复制CSS样式出错 -> static/editor.md/lib/mermaid/mermaid.css", err)
 	}
 

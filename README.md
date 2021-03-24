@@ -13,18 +13,35 @@ MinDoc 的前身是 SmartWiki 文档系统。SmartWiki 是基于 PHP 框架 lara
 
 演示站点： [http://doc.iminho.me](http://doc.iminho.me)
 
+---
+
+<details>
+<summary>开发维护召集令</summary>
+
+感谢作者 [lifei6671](https://github.com/lifei6671) 创造了MinDoc，并持续维护了很久。
+
+本人向公司推广了MinDoc，反向很好。受益于开源，便想回馈于开源。但看到MinDoc似乎停更了一年，尝试和作者沟通后，得知作者因工作等原因，精力有限，无法持续维护，请求得到了GitHub仓库的部分维护权限。
+本人技术能力有限，且业余时间并不充裕，处理 Issues 和 Pull Requests 的进度缓慢，希望能和热心开发者一起持续维护MinDoc。
+维护权限需要作者添加，有意向者请添加下方QQ群，或通过发送邮件(`gsw945#foxmail.com`, 请替换`#`为`@`)，私聊我加入作者所在的微信群。
+</details>
+
+遇到问题请提 [Issues](https://github.com/mindoc-org/mindoc/issues )，欢迎使用者和贡献者加入QQ群 `1051164153`
+<a target="_blank" href="https://qm.qq.com/cgi-bin/qm/qr?k=bHFR7P3Qp1nsSPbsTw4KN_ZpFLUAblIU&jump_from=webapi"><img border="0" src="https://pub.idqqimg.com/wpa/images/group.png" alt="MinDoc使用&amp;开发交流群" title="MinDoc使用&amp;开发交流群"></a>
+
+---
+
 # 安装与使用
 
 **如果你的服务器上没有安装golang程序请手动设置一个环境变量如下：键名为 ZONEINFO，值为MinDoc跟目录下的/lib/time/zoneinfo.zip 。**
 
-更多信息请查看手册： [MinDoc 使用手册](https://github.com/lifei6671/mindoc/wiki)
+更多信息请查看手册： [MinDoc 使用手册](https://www.iminho.me/wiki/docs/mindoc/mindoc-summary.md)
 
-对于没有Golang使用经验的用户，可以从 [https://github.com/lifei6671/mindoc/releases](https://github.com/lifei6671/mindoc/releases) 这里下载编译完的程序。
+对于没有Golang使用经验的用户，可以从 [https://github.com/mindoc-org/mindoc/releases](https://github.com/mindoc-org/mindoc/releases) 这里下载编译完的程序。
 
 如果有Golang开发经验，建议通过编译安装，在此之前，您需要先安装Golang官方包管理工具，详见[Install dep](https://golang.github.io/dep/docs/installation.html)。
 
 ```bash
-git clone https://github.com/lifei6671/mindoc.git
+git clone https://github.com/mindoc-org/mindoc.git
 
 dep ensure
 
@@ -36,9 +53,11 @@ go build -ldflags "-w"
 
 ```
 
-MinDoc 使用MySQL储存数据，且编码必须是`utf8mb4_general_ci`。请在安装前，把数据库配置填充到项目目录下的 conf/app.conf 中。
+MinDoc 如果使用MySQL储存数据，则编码必须是`utf8mb4_general_ci`。请在安装前，把数据库配置填充到项目目录下的 `conf/app.conf` 中。
 
-如果conf目录下不存在 app.conf 请重命名 app.conf.example 为 app.conf。
+如果使用 `SQLite` 数据库，则直接在配置文件中配置数据库路径即可.
+
+如果conf目录下不存在 `app.conf` 请重命名 `app.conf.example` 为 `app.conf`。
 
 **默认程序会自动初始化一个超级管理员用户：admin 密码：123456 。请登录后重新设置密码。**
 
@@ -69,7 +88,7 @@ mail_expired=30
 在启动镜像时需要提供如下的环境变量：
 
 ```ini
-DB_ADAPTER                  制定 DB
+DB_ADAPTER                  指定 DB
 MYSQL_PORT_3306_TCP_ADDR    MySQL地址
 MYSQL_PORT_3306_TCP_PORT    MySQL端口号
 MYSQL_INSTANCE_NAME         MySQL数据库名称
@@ -90,6 +109,7 @@ docker run -p 8181:8181 --name mindoc -e DB_ADAPTER=mysql -e MYSQL_PORT_3306_TCP
     `environment`节点，配置自己的环境变量。
     
 2. 一键完成所有环境搭建
+    
     > docker-compose up -d
 3. 浏览器访问
     > http://localhost:8181/
@@ -97,21 +117,21 @@ docker run -p 8181:8181 --name mindoc -e DB_ADAPTER=mysql -e MYSQL_PORT_3306_TCP
     整个部署完成了
 4. 常用命令参考
    - 启动
+        
         > docker-compose up -d
    - 停止
+        
         > docker-compose stop
    - 重启
+        
         > docker-compose restart
    - 停止删除容器，释放所有资源
+        
         > docker-compose down
    - 删除并重新创建
         > docker-compose -f docker-compose.yml down && docker-compose up -d
    更多 docker-compose 的使用相关的内容 请查看官网文档或百度
    
-# 支持 MinDoc
-
-![支付宝](https://raw.githubusercontent.com/lifei6671/mindoc/master/static/images/alipay.png) ![微信支付](https://raw.githubusercontent.com/lifei6671/mindoc/master/static/images/weixin.png)
-
 # 项目截图
 
 **创建项目**
@@ -189,3 +209,7 @@ docker run -p 8181:8181 --name mindoc -e DB_ADAPTER=mysql -e MYSQL_PORT_3306_TCP
 # 关于作者
 
 一个不纯粹的PHPer，一个不自由的 gopher 。
+
+# 支持 MinDoc
+
+![支付宝](https://raw.githubusercontent.com/lifei6671/mindoc/master/static/images/alipay.png) ![微信支付](https://raw.githubusercontent.com/lifei6671/mindoc/master/static/images/weixin.png)

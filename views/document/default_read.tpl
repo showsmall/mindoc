@@ -43,12 +43,14 @@
             <div class="navbar-header pull-right manual-menu">
                 <a href="javascript:window.print();" id="printSinglePage" class="btn btn-default" style="margin-right: 10px;"><i class="fa fa-print"></i> 打印</a>
                 {{if gt .Member.MemberId 0}}
-                {{if gt .Model.RelationshipId 0}}
                 {{if eq .Model.RoleId 0 1 2}}
                 <div class="dropdown pull-right">
-                   <a href="{{urlfor "DocumentController.Edit" ":key" .Model.Identify ":id" ""}}" class="btn btn-default"><i class="fa fa-edit" aria-hidden="true"></i> 编辑</a>
+                    <a href="{{urlfor "DocumentController.Edit" ":key" .Model.Identify ":id" ""}}" class="btn btn-default"><i class="fa fa-edit" aria-hidden="true"></i> 编辑</a>
+                    {{if eq .Model.RoleId 0 1}}
+                    <a href="{{urlfor "BookController.Users" ":key" .Model.Identify}}" class="btn btn-success"><i class="fa fa-user" aria-hidden="true"></i> 成员</a>
+                    <a href="{{urlfor "BookController.Setting" ":key" .Model.Identify}}" class="btn btn-primary"><i class="fa fa-gear" aria-hidden="true"></i> 设置</a>
+                    {{end}}
                 </div>
-                {{end}}
                 {{end}}
                 {{end}}
                 <div class="dropdown pull-right" style="margin-right: 10px;">
@@ -86,6 +88,10 @@
                 <div class="tab-navg">
                     <span data-mode="view" class="navg-item active"><i class="fa fa-align-justify"></i><b class="text">目录</b></span>
                     <span data-mode="search" class="navg-item"><i class="fa fa-search"></i><b class="text">搜索</b></span>
+                    <span id="handlerMenuShow" style="float: right;display: inline-block;padding: 5px;cursor: pointer;">
+                        <i class="fa fa-angle-left" style="font-size: 20px;padding-right: 5px;"></i>
+                        <span class="pull-right" style="padding-top: 4px;">展开</span>
+                    </span>
                 </div>
                 <div class="tab-util">
                     <span class="manual-fullscreen-switch">
@@ -288,6 +294,43 @@ $(function () {
             return $(body).highlight(window.keyword);
         });
     });
+
+    window.menuControl = true;
+    window.menuSetting = "open" ;
+    if (menuSetting == 'open' || menuSetting == 'first') {
+        $('#handlerMenuShow').find('span').text('收起');
+        $('#handlerMenuShow').find('i').attr("class","fa fa-angle-down");
+        if (menuSetting == 'open') {
+            window.jsTree.jstree().open_all()
+        }
+        if (menuSetting == 'first') {
+            window.jsTree.jstree('close_all')
+            var $target = $('.jstree-container-ul').children('li').filter(function(index){
+                if($(this).attr('aria-expanded')==false||$(this).attr('aria-expanded')){
+                    return $(this)
+                }else{
+                    delete $(this)
+                }
+            })
+            $target.children('i').trigger('click')
+        }
+    } else {
+        menuControl = false;
+        window.jsTree.jstree('close_all')
+    }
+    $('#handlerMenuShow').on('click', function(){
+        if(menuControl){
+            $(this).find('span').text('展开')
+            $(this).find('i').attr("class","fa fa-angle-left")
+            window.menuControl = false
+            window.jsTree.jstree('close_all')
+        }else{
+            window.menuControl = true
+            $(this).find('span').text('收起')
+            $(this).find('i').attr("class","fa fa-angle-down")
+            window.jsTree.jstree().open_all()
+        }
+    })
 });
 </script>
 {{.Scripts}}

@@ -8,13 +8,14 @@ import (
 	"strings"
 	"time"
 
-	"github.com/astaxie/beego"
-	"github.com/lifei6671/mindoc/conf"
-	"github.com/lifei6671/mindoc/models"
-	"github.com/lifei6671/mindoc/utils"
-	"path/filepath"
-	"io/ioutil"
 	"html/template"
+	"io/ioutil"
+	"path/filepath"
+
+	"github.com/astaxie/beego"
+	"github.com/mindoc-org/mindoc/conf"
+	"github.com/mindoc-org/mindoc/models"
+	"github.com/mindoc-org/mindoc/utils"
 )
 
 type BaseController struct {
@@ -79,6 +80,10 @@ func (c *BaseController) Prepare() {
 	}
 
 }
+//判断用户是否登录.
+func (c *BaseController)isUserLoggedIn() bool {
+	return c.Member != nil && c.Member.MemberId > 0
+}
 
 // SetMember 获取或设置当前登录用户信息,如果 MemberId 小于 0 则标识删除 Session
 func (c *BaseController) SetMember(member models.Member) {
@@ -103,6 +108,30 @@ func (c *BaseController) JsonResult(errCode int, errMsg string, data ...interfac
 	if len(data) > 0 && data[0] != nil {
 		jsonData["data"] = data[0]
 	}
+
+	returnJSON, err := json.Marshal(jsonData)
+
+	if err != nil {
+		beego.Error(err)
+	}
+
+	c.Ctx.ResponseWriter.Header().Set("Content-Type", "application/json; charset=utf-8")
+	c.Ctx.ResponseWriter.Header().Set("Cache-Control", "no-cache, no-store")
+	io.WriteString(c.Ctx.ResponseWriter, string(returnJSON))
+
+	c.StopRun()
+}
+
+//如果错误不为空，则响应错误信息到浏览器.
+func (c *BaseController) CheckJsonError(code int,err error) {
+
+	if err == nil {
+		return
+	}
+	jsonData := make(map[string]interface{}, 3)
+
+	jsonData["errcode"] = code
+	jsonData["message"] = err.Error()
 
 	returnJSON, err := json.Marshal(jsonData)
 
@@ -160,7 +189,14 @@ func (c *BaseController) ShowErrorPage(errCode int, errMsg string) {
 	}
 	if errCode >= 200 && errCode <= 510 {
 		c.CustomAbort(errCode, buf.String())
-	}else{
+	} else {
 		c.CustomAbort(500, buf.String())
+	}
+}
+
+
+func (c *BaseController) CheckErrorResult(code int,err error) {
+	if err != nil {
+		c.ShowErrorPage(code, err.Error())
 	}
 }

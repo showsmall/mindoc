@@ -11,21 +11,23 @@ import (
 	"strings"
 	"time"
 
+	"bytes"
 	"encoding/json"
+	"net/http"
 
 	"github.com/astaxie/beego"
 	beegoCache "github.com/astaxie/beego/cache"
 	_ "github.com/astaxie/beego/cache/memcache"
+	"github.com/astaxie/beego/cache/redis"
 	_ "github.com/astaxie/beego/cache/redis"
 	"github.com/astaxie/beego/logs"
 	"github.com/astaxie/beego/orm"
-	"github.com/lifei6671/gocaptcha"
-	"github.com/lifei6671/mindoc/cache"
-	"github.com/lifei6671/mindoc/conf"
-	"github.com/lifei6671/mindoc/models"
-	"github.com/lifei6671/mindoc/utils/filetil"
-	"github.com/astaxie/beego/cache/redis"
 	"github.com/howeyc/fsnotify"
+	"github.com/lifei6671/gocaptcha"
+	"github.com/mindoc-org/mindoc/cache"
+	"github.com/mindoc-org/mindoc/conf"
+	"github.com/mindoc-org/mindoc/models"
+	"github.com/mindoc-org/mindoc/utils/filetil"
 )
 
 // RegisterDataBase 注册数据库
@@ -33,6 +35,7 @@ func RegisterDataBase() {
 	beego.Info("正在初始化数据库配置.")
 	adapter := beego.AppConfig.String("db_adapter")
 	orm.DefaultTimeLoc = time.Local
+	orm.DefaultRowsLimit = -1
 
 	if strings.EqualFold(adapter, "mysql") {
 		host := beego.AppConfig.String("db_host")
@@ -63,16 +66,15 @@ func RegisterDataBase() {
 		if strings.HasPrefix(database, "./") {
 			database = filepath.Join(conf.WorkingDirectory, string(database[1:]))
 		}
-		if p,err := filepath.Abs(database); err == nil {
+		if p, err := filepath.Abs(database); err == nil {
 			database = p
 		}
 
 		dbPath := filepath.Dir(database)
 
-		if _,err := os.Stat(dbPath); err != nil && os.IsNotExist(err) {
-			os.MkdirAll(dbPath, 0777)
+		if _, err := os.Stat(dbPath); err != nil && os.IsNotExist(err) {
+			_ = os.MkdirAll(dbPath, 0777)
 		}
-
 
 		err := orm.RegisterDataBase("default", "sqlite3", database)
 
@@ -102,6 +104,10 @@ func RegisterModel() {
 		new(models.Label),
 		new(models.Blog),
 		new(models.Template),
+		new(models.Team),
+		new(models.TeamMember),
+		new(models.TeamRelationship),
+		new(models.Itemsets),
 	)
 	gob.Register(models.Blog{})
 	gob.Register(models.Document{})
@@ -113,25 +119,25 @@ func RegisterModel() {
 func RegisterLogger(log string) {
 
 	logs.SetLogFuncCall(true)
-	logs.SetLogger("console")
+	_ = logs.SetLogger("console")
 	logs.EnableFuncCallDepth(true)
 
 	if beego.AppConfig.DefaultBool("log_is_async", true) {
 		logs.Async(1e3)
 	}
 	if log == "" {
-		logPath,err := filepath.Abs(beego.AppConfig.DefaultString("log_path",conf.WorkingDir("runtime","logs")))
+		logPath, err := filepath.Abs(beego.AppConfig.DefaultString("log_path", conf.WorkingDir("runtime", "logs")))
 		if err == nil {
 			log = logPath
-		}else{
-			log = conf.WorkingDir("runtime","logs")
+		} else {
+			log = conf.WorkingDir("runtime", "logs")
 		}
 	}
 
 	logPath := filepath.Join(log, "log.log")
 
 	if _, err := os.Stat(log); os.IsNotExist(err) {
-		os.MkdirAll(log, 0777)
+		_ = os.MkdirAll(log, 0755)
 	}
 
 	config := make(map[string]interface{}, 1)
@@ -155,32 +161,38 @@ func RegisterLogger(log string) {
 	if level := beego.AppConfig.DefaultString("log_level", "Trace"); level != "" {
 		switch level {
 		case "Emergency":
-			config["level"] = beego.LevelEmergency;break
+			config["level"] = beego.LevelEmergency
+			break
 		case "Alert":
-			config["level"] = beego.LevelAlert;break
+			config["level"] = beego.LevelAlert
+			break
 		case "Critical":
-			config["level"] = beego.LevelCritical;break
+			config["level"] = beego.LevelCritical
+			break
 		case "Error":
-			config["level"] = beego.LevelError; break
+			config["level"] = beego.LevelError
+			break
 		case "Warning":
-			config["level"] = beego.LevelWarning; break
+			config["level"] = beego.LevelWarning
+			break
 		case "Notice":
-			config["level"] = beego.LevelNotice; break
+			config["level"] = beego.LevelNotice
+			break
 		case "Informational":
-			config["level"] = beego.LevelInformational;break
+			config["level"] = beego.LevelInformational
+			break
 		case "Debug":
-			config["level"] = beego.LevelDebug;break
+			config["level"] = beego.LevelDebug
+			break
 		}
 	}
-	b, err := json.Marshal(config);
-	if  err != nil {
-		beego.Error("初始化文件日志时出错 ->",err)
-		beego.SetLogger("file", `{"filename":"`+ logPath + `"}`)
-	}else{
-		beego.SetLogger(logs.AdapterFile, string(b))
+	b, err := json.Marshal(config)
+	if err != nil {
+		beego.Error("初始化文件日志时出错 ->", err)
+		_ = beego.SetLogger("file", `{"filename":"`+logPath+`"}`)
+	} else {
+		_ = beego.SetLogger(logs.AdapterFile, string(b))
 	}
-
-
 
 	beego.SetLogFuncCall(true)
 }
@@ -200,9 +212,13 @@ func RegisterCommand() {
 
 //注册模板函数
 func RegisterFunction() {
-	beego.AddFuncMap("config", models.GetOptionValue)
+	err := beego.AddFuncMap("config", models.GetOptionValue)
 
-	beego.AddFuncMap("cdn", func(p string) string {
+	if err != nil {
+		beego.Error("注册函数 config 出错 ->", err)
+		os.Exit(-1)
+	}
+	err = beego.AddFuncMap("cdn", func(p string) string {
 		cdn := beego.AppConfig.DefaultString("cdn", "")
 		if strings.HasPrefix(p, "http://") || strings.HasPrefix(p, "https://") {
 			return p
@@ -227,15 +243,39 @@ func RegisterFunction() {
 		}
 		return cdn + p
 	})
+	if err != nil {
+		beego.Error("注册函数 cdn 出错 ->", err)
+		os.Exit(-1)
+	}
 
-	beego.AddFuncMap("cdnjs", conf.URLForWithCdnJs)
-	beego.AddFuncMap("cdncss", conf.URLForWithCdnCss)
-	beego.AddFuncMap("cdnimg", conf.URLForWithCdnImage)
+	err = beego.AddFuncMap("cdnjs", conf.URLForWithCdnJs)
+	if err != nil {
+		beego.Error("注册函数 cdnjs 出错 ->", err)
+		os.Exit(-1)
+	}
+	err = beego.AddFuncMap("cdncss", conf.URLForWithCdnCss)
+	if err != nil {
+		beego.Error("注册函数 cdncss 出错 ->", err)
+		os.Exit(-1)
+	}
+	err = beego.AddFuncMap("cdnimg", conf.URLForWithCdnImage)
+	if err != nil {
+		beego.Error("注册函数 cdnimg 出错 ->", err)
+		os.Exit(-1)
+	}
 	//重写url生成，支持配置域名以及域名前缀
-	beego.AddFuncMap("urlfor", conf.URLFor)
-	beego.AddFuncMap("date_format", func(t time.Time, format string) string {
+	err = beego.AddFuncMap("urlfor", conf.URLFor)
+	if err != nil {
+		beego.Error("注册函数 urlfor 出错 ->", err)
+		os.Exit(-1)
+	}
+	err = beego.AddFuncMap("date_format", func(t time.Time, format string) string {
 		return t.Local().Format(format)
 	})
+	if err != nil {
+		beego.Error("注册函数 date_format 出错 ->", err)
+		os.Exit(-1)
+	}
 }
 
 //解析命令
@@ -245,7 +285,9 @@ func ResolveCommand(args []string) {
 	flagSet.StringVar(&conf.WorkingDirectory, "dir", "", "MinDoc working directory.")
 	flagSet.StringVar(&conf.LogFile, "log", "", "MinDoc log file path.")
 
-	flagSet.Parse(args)
+	if err := flagSet.Parse(args); err != nil {
+		log.Fatal("解析命令失败 ->", err)
+	}
 
 	if conf.WorkingDirectory == "" {
 		if p, err := filepath.Abs(os.Args[0]); err == nil {
@@ -254,32 +296,32 @@ func ResolveCommand(args []string) {
 	}
 
 	if conf.ConfigurationFile == "" {
-		conf.ConfigurationFile = conf.WorkingDir( "conf", "app.conf")
+		conf.ConfigurationFile = conf.WorkingDir("conf", "app.conf")
 		config := conf.WorkingDir("conf", "app.conf.example")
 		if !filetil.FileExists(conf.ConfigurationFile) && filetil.FileExists(config) {
-			filetil.CopyFile(conf.ConfigurationFile, config)
+			_ = filetil.CopyFile(conf.ConfigurationFile, config)
 		}
 	}
-	if err := gocaptcha.ReadFonts(conf.WorkingDir( "static", "fonts"), ".ttf");err != nil {
-		log.Fatal("读取字体文件时出错 -> ",err)
+	if err := gocaptcha.ReadFonts(conf.WorkingDir("static", "fonts"), ".ttf"); err != nil {
+		log.Fatal("读取字体文件时出错 -> ", err)
 	}
 
-	if err := beego.LoadAppConfig("ini", conf.ConfigurationFile);err != nil {
+	if err := beego.LoadAppConfig("ini", conf.ConfigurationFile); err != nil {
 		log.Fatal("An error occurred:", err)
 	}
 	if conf.LogFile == "" {
-		logPath,err := filepath.Abs(beego.AppConfig.DefaultString("log_path",conf.WorkingDir("runtime","logs")))
+		logPath, err := filepath.Abs(beego.AppConfig.DefaultString("log_path", conf.WorkingDir("runtime", "logs")))
 		if err == nil {
 			conf.LogFile = logPath
-		}else{
-			conf.LogFile = conf.WorkingDir("runtime","logs")
+		} else {
+			conf.LogFile = conf.WorkingDir("runtime", "logs")
 		}
 	}
 
-	conf.AutoLoadDelay = beego.AppConfig.DefaultInt("config_auto_delay",0)
+	conf.AutoLoadDelay = beego.AppConfig.DefaultInt("config_auto_delay", 0)
 	uploads := conf.WorkingDir("uploads")
 
-	os.MkdirAll(uploads, 0666)
+	_ = os.MkdirAll(uploads, 0666)
 
 	beego.BConfig.WebConfig.StaticDir["/static"] = filepath.Join(conf.WorkingDirectory, "static")
 	beego.BConfig.WebConfig.StaticDir["/uploads"] = uploads
@@ -290,7 +332,9 @@ func ResolveCommand(args []string) {
 	if !filetil.FileExists(fonts) {
 		log.Fatal("Font path not exist.")
 	}
-	gocaptcha.ReadFonts(filepath.Join(conf.WorkingDirectory, "static", "fonts"), ".ttf")
+	if err := gocaptcha.ReadFonts(filepath.Join(conf.WorkingDirectory, "static", "fonts"), ".ttf"); err != nil {
+		log.Fatal("读取字体失败 ->", err)
+	}
 
 	RegisterDataBase()
 	RegisterCache()
@@ -330,7 +374,7 @@ func RegisterCache() {
 			os.Exit(1)
 		}
 
-		fileCache.StartAndGC(string(bc))
+		_ = fileCache.StartAndGC(string(bc))
 
 		cache.Init(fileCache)
 
@@ -341,7 +385,7 @@ func RegisterCache() {
 		cache.Init(memory)
 	} else if cacheProvider == "redis" {
 		//设置Redis前缀
-		if key := beego.AppConfig.DefaultString("cache_redis_prefix",""); key != "" {
+		if key := beego.AppConfig.DefaultString("cache_redis_prefix", ""); key != "" {
 			redis.DefaultKey = key
 		}
 		var redisConfig struct {
@@ -394,20 +438,20 @@ func RegisterCache() {
 
 	} else {
 		cache.Init(&cache.NullCache{})
-		beego.Warn("不支持的缓存管道,缓存将禁用 ->" ,cacheProvider)
+		beego.Warn("不支持的缓存管道,缓存将禁用 ->", cacheProvider)
 		return
 	}
 	beego.Info("缓存初始化完成.")
 }
 
 //自动加载配置文件.修改了监听端口号和数据库配置无法自动生效.
-func RegisterAutoLoadConfig()  {
+func RegisterAutoLoadConfig() {
 	if conf.AutoLoadDelay > 0 {
 
 		watcher, err := fsnotify.NewWatcher()
 
 		if err != nil {
-			beego.Error("创建配置文件监控器失败 ->",err)
+			beego.Error("创建配置文件监控器失败 ->", err)
 		}
 		go func() {
 			for {
@@ -423,7 +467,7 @@ func RegisterAutoLoadConfig()  {
 						RegisterLogger("")
 						beego.Info("配置文件已加载 ->", conf.ConfigurationFile)
 					} else if ev.IsRename() {
-						watcher.WatchFlags(conf.ConfigurationFile, fsnotify.FSN_MODIFY|fsnotify.FSN_RENAME)
+						_ = watcher.WatchFlags(conf.ConfigurationFile, fsnotify.FSN_MODIFY|fsnotify.FSN_RENAME)
 					}
 					beego.Info(ev.String())
 				case err := <-watcher.Error:
@@ -436,9 +480,39 @@ func RegisterAutoLoadConfig()  {
 		err = watcher.WatchFlags(conf.ConfigurationFile, fsnotify.FSN_MODIFY|fsnotify.FSN_RENAME)
 
 		if err != nil {
-			beego.Error("监控配置文件失败 ->",err)
+			beego.Error("监控配置文件失败 ->", err)
 		}
 	}
+}
+
+//注册错误处理方法.
+func RegisterError() {
+	beego.ErrorHandler("404", func(writer http.ResponseWriter, request *http.Request) {
+		var buf bytes.Buffer
+
+		data := make(map[string]interface{})
+		data["ErrorCode"] = 404
+		data["ErrorMessage"] = "页面未找到或已删除"
+
+		if err := beego.ExecuteViewPathTemplate(&buf, "errors/error.tpl", beego.BConfig.WebConfig.ViewsPath, data); err == nil {
+			_, _ = fmt.Fprint(writer, buf.String())
+		} else {
+			_, _ = fmt.Fprint(writer, data["ErrorMessage"])
+		}
+	})
+	beego.ErrorHandler("401", func(writer http.ResponseWriter, request *http.Request) {
+		var buf bytes.Buffer
+
+		data := make(map[string]interface{})
+		data["ErrorCode"] = 401
+		data["ErrorMessage"] = "请与 Web 服务器的管理员联系，以确认您是否具有访问所请求资源的权限。"
+
+		if err := beego.ExecuteViewPathTemplate(&buf, "errors/error.tpl", beego.BConfig.WebConfig.ViewsPath, data); err == nil {
+			_, _ = fmt.Fprint(writer, buf.String())
+		} else {
+			_, _ = fmt.Fprint(writer, data["ErrorMessage"])
+		}
+	})
 }
 
 func init() {
@@ -446,7 +520,9 @@ func init() {
 	if configPath, err := filepath.Abs(conf.ConfigurationFile); err == nil {
 		conf.ConfigurationFile = configPath
 	}
-	gocaptcha.ReadFonts(conf.WorkingDir("static","fonts"), ".ttf")
+	if err := gocaptcha.ReadFonts(conf.WorkingDir("static", "fonts"), ".ttf"); err != nil {
+		log.Fatal("读取字体文件失败 ->", err)
+	}
 	gob.Register(models.Member{})
 
 	if p, err := filepath.Abs(os.Args[0]); err == nil {

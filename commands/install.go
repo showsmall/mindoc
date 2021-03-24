@@ -5,12 +5,13 @@ import (
 	"os"
 	"time"
 
-	"github.com/astaxie/beego/orm"
-	"github.com/lifei6671/mindoc/conf"
-	"github.com/lifei6671/mindoc/models"
 	"flag"
-	"github.com/lifei6671/mindoc/utils"
+
 	"github.com/astaxie/beego"
+	"github.com/astaxie/beego/orm"
+	"github.com/mindoc-org/mindoc/conf"
+	"github.com/mindoc-org/mindoc/models"
+	"github.com/mindoc-org/mindoc/utils"
 )
 
 //系统安装.
@@ -122,6 +123,7 @@ func initialization() {
 		book.MemberId = member.MemberId
 		book.BookName = "MinDoc演示项目"
 		book.Status = 0
+		book.ItemId = 1
 		book.Description = "这是一个MinDoc演示项目，该项目是由系统初始化时自动创建。"
 		book.CommentCount = 0
 		book.PrivatelyOwned = 0
@@ -135,8 +137,18 @@ func initialization() {
 		book.Theme = "default"
 
 		if err := book.Insert(); err != nil {
-			panic("Book.Insert => " + err.Error())
-			os.Exit(0)
+			panic("初始化项目失败 -> " + err.Error())
+			os.Exit(1)
+		}
+	}
+
+	if !models.NewItemsets().Exist(1) {
+		item := models.NewItemsets()
+		item.ItemName = "默认项目空间"
+		item.MemberId = 1
+		if err := item.Save(); err != nil {
+			panic("初始化项目空间失败 -> " + err.Error())
+			os.Exit(1)
 		}
 	}
 }

@@ -11,7 +11,7 @@ $(function () {
         toolbar: true,
         placeholder: "本编辑器支持 Markdown 编辑，左边编写，右边预览。",
         imageUpload: true,
-        imageFormats: ["jpg", "jpeg", "gif", "png", "JPG", "JPEG", "GIF", "PNG"],
+        imageFormats: ["jpg", "jpeg", "gif", "png","svg", "JPG", "JPEG", "GIF", "PNG","SVG"],
         imageUploadURL: window.imageUploadURL,
         toolbarModes: "full",
         fileUpload: true,
@@ -64,6 +64,20 @@ $(function () {
         }
     });
 
+    function insertToMarkdown(body) {
+        window.isLoad = true;
+        window.editor.insertValue(body);
+        window.editor.setCursor({ line: 0, ch: 0 });
+        resetEditorChanged(true);
+    }
+    function insertAndClearToMarkdown(body) {
+        window.isLoad = true;
+        window.editor.clear();
+        window.editor.insertValue(body);
+        window.editor.setCursor({ line: 0, ch: 0 });
+        resetEditorChanged(true);
+    }
+
     /**
      * 实现标题栏操作
      */
@@ -79,7 +93,9 @@ $(function () {
            $("#documentTemplateModal").modal("show");
        } else if(name === "save-template"){
            $("#saveTemplateModal").modal("show");
-       }else if (name === "sidebar") {
+       } else if(name === 'json'){
+           $("#convertJsonToTableModal").modal("show");
+       } else if (name === "sidebar") {
             $("#manualCategory").toggle(0, "swing", function () {
                 var $then = $("#manualEditorContainer");
                 var left = parseInt($then.css("left"));
@@ -109,9 +125,11 @@ $(function () {
            // 插入 GFM 任务列表
            var cm = window.editor.cm;
            var selection = cm.getSelection();
-
+           var cursor    = cm.getCursor();
            if (selection === "") {
+               cm.setCursor(cursor.line, 0);
                cm.replaceSelection("- [x] " + selection);
+               cm.setCursor(cursor.line, cursor.ch + 6);
            } else {
                var selectionText = selection.split("\n");
 
@@ -178,6 +196,10 @@ $(function () {
 
         if (!node) {
             layer.msg("获取当前文档信息失败");
+            return;
+        }
+        if (node.a_attr && node.a_attr.disabled) {
+            layer.msg("空节点不能添加内容");
             return;
         }
 
@@ -365,7 +387,7 @@ $(function () {
 
         //如果没有选中节点则选中默认节点
         // openLastSelectedNode();
-    }).on('select_node.jstree', function (node, selected, event) {
+    }).on('select_node.jstree', function (node, selected) {
 
         if ($("#markdown-save").hasClass('change')) {
             if (confirm("编辑内容未保存，需要保存吗？")) {
@@ -375,6 +397,12 @@ $(function () {
                 return true;
             }
         }
+        //如果是空目录则直接出发展开下一级功能
+        if (selected.node.a_attr && selected.node.a_attr.disabled) {
+            selected.instance.toggle_node(selected.node);
+            return false
+        }
+
 
         loadDocument(selected);
     }).on("move_node.jstree", jstree_save).on("delete_node.jstree",function($node,$parent) {
@@ -521,4 +549,27 @@ $(function () {
         })
     });
 
+    $("#btnInsertTable").on("click",function () {
+       var content = $("#jsonContent").val();
+       if(content !== "") {
+           try {
+               var jsonObj = $.parseJSON(content);
+               var data = foreachJson(jsonObj,"");
+               var table = "| 参数名称  | 参数类型  | 示例值  |  备注 |\n| ------------ | ------------ | ------------ | ------------ |\n";
+               $.each(data,function (i,item) {
+                    table += "|" + item.key + "|" + item.type + "|" + item.value +"| |\n";
+               });
+                insertToMarkdown(table);
+           }catch (e) {
+               showError("Json 格式错误:" + e.toString(),"#json-error-message");
+               return;
+           }
+       }
+       $("#convertJsonToTableModal").modal("hide");
+    });
+    $("#convertJsonToTableModal").on("hidden.bs.modal",function () {
+        $("#jsonContent").val("");
+    }).on("shown.bs.modal",function () {
+        $("#jsonContent").focus();
+    });
 });

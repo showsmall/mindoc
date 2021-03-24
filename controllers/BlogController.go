@@ -1,22 +1,23 @@
 package controllers
 
 import (
-	"strings"
-	"github.com/lifei6671/mindoc/models"
-	"time"
-	"github.com/astaxie/beego"
-	"github.com/lifei6671/mindoc/conf"
-	"github.com/lifei6671/mindoc/utils/pagination"
-	"strconv"
-	"fmt"
-	"os"
-	"net/http"
-	"path/filepath"
-	"github.com/astaxie/beego/orm"
-	"html/template"
 	"encoding/json"
-	"github.com/lifei6671/mindoc/utils"
+	"fmt"
+	"html/template"
+	"net/http"
 	"net/url"
+	"os"
+	"path/filepath"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/astaxie/beego"
+	"github.com/astaxie/beego/orm"
+	"github.com/mindoc-org/mindoc/conf"
+	"github.com/mindoc-org/mindoc/models"
+	"github.com/mindoc-org/mindoc/utils"
+	"github.com/mindoc-org/mindoc/utils/pagination"
 )
 
 type BlogController struct {
@@ -53,7 +54,7 @@ func (c *BlogController) Index() {
 			c.JsonResult(6001, "文章密码不正确")
 		} else if blog.BlogStatus == "password" && password == blog.Password {
 			//如果密码输入正确，则存入session中
-			c.CruSession.Set(blogReadSession, blogId)
+			_ = c.CruSession.Set(blogReadSession, blogId)
 			c.JsonResult(0, "OK")
 		}
 		c.JsonResult(0, "OK")
@@ -61,8 +62,11 @@ func (c *BlogController) Index() {
 		//如果不存在已输入密码的标记
 		c.TplName = "blog/index_password.tpl"
 	}
-	//加载文章附件
-	blog.LinkAttach();
+	if blog.BlogType != 1 {
+		//加载文章附件
+		_ = blog.LinkAttach()
+	}
+
 	c.Data["Model"] = blog
 	c.Data["Content"] = template.HTML(blog.BlogRelease)
 
@@ -533,14 +537,14 @@ func (c *BlogController) Upload() {
 
 		if err := attachment.Insert(); err != nil {
 			os.Remove(filePath)
-			beego.Error("保存文件附件失败 => ", err)
+			beego.Error("保存文件附件失败 -> ", err)
 			c.JsonResult(6006, "文件保存失败")
 		}
 		if attachment.HttpPath == "" {
-			attachment.HttpPath = conf.URLFor("BlogController.Download", ":id", blogId, ":attach_id", attachment.AttachmentId)
+			attachment.HttpPath = conf.URLForNotHost("BlogController.Download", ":id", blogId, ":attach_id", attachment.AttachmentId)
 
 			if err := attachment.Update(); err != nil {
-				beego.Error("SaveToFile => ", err)
+				beego.Error("保存文件失败 -> ",attachment.FilePath, err)
 				c.JsonResult(6005, "保存文件失败")
 			}
 		}
@@ -632,16 +636,18 @@ func (c *BlogController) Download() {
 	attachment, err := models.NewAttachment().Find(attachId)
 
 	if err != nil {
-		beego.Error("DownloadAttachment => ", err)
 		if err == orm.ErrNoRows {
 			c.ShowErrorPage(404, "附件不存在")
 		} else {
+			beego.Error("查询附件时出现异常 -> ", err)
 			c.ShowErrorPage(500, "查询附件时出现异常")
 		}
 	}
-	if blog.BlogType == 1 && attachment.BookId != blog.BookId && attachment.DocumentId != blog.DocumentId {
+
+	//如果是链接的文章，需要校验文档ID是否一致，如果不是，需要保证附件的项目ID为0且文档的ID等于博文ID
+	if blog.BlogType == 1 && attachment.DocumentId != blog.DocumentId {
 		c.ShowErrorPage(404, "附件不存在")
-	} else if attachment.BookId != 0 || attachment.DocumentId != blogId {
+	} else if blog.BlogType != 1 && (attachment.BookId != 0 || attachment.DocumentId != blogId ) {
 		c.ShowErrorPage(404, "附件不存在")
 	}
 
